@@ -1,0 +1,12 @@
+{
+  "name": "AI Kisan Mitra – Har Kisan Ka Digital Saathi",
+  "description": "Premium multilingual AI-powered agritech platform offering crop disease detection, live mandi prices, expert advice, fertilizer planning, soil analysis, water guides, and an officer dashboard.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

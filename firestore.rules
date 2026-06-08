@@ -1,0 +1,182 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Entity-specific validation helpers for safer writes
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'language', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 12
+        && data.uid is string
+        && data.uid == request.auth.uid
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 100
+        && data.language is string
+        && (data.language == 'en' || data.language == 'hi' || data.language == 'pa')
+        && data.role is string
+        && (data.role == 'farmer' || data.role == 'officer' || data.role == 'admin')
+        && (!('email' in data) || data.email is string)
+        && (!('phone' in data) || data.phone is string);
+    }
+
+    function isValidDiseaseReport(data) {
+      return data.keys().hasAll(['id', 'userId', 'cropType', 'imageUrl', 'diseaseName', 'confidence', 'createdAt'])
+        && data.keys().size() <= 13
+        && data.id is string
+        && data.userId == request.auth.uid
+        && data.cropType is string
+        && data.imageUrl is string
+        && data.diseaseName is string
+        && (data.confidence is float || data.confidence is int)
+        && data.createdAt is string
+        && (!('causes' in data) || data.causes is string)
+        && (!('symptoms' in data) || data.symptoms is list)
+        && (!('prevention' in data) || data.prevention is string)
+        && (!('treatment' in data) || data.treatment is string)
+        && (!('isFallback' in data) || data.isFallback is bool)
+        && (!('fallbackReason' in data) || data.fallbackReason is string);
+    }
+
+    function isValidSoilReport(data) {
+      return data.keys().hasAll(['id', 'userId', 'crop', 'nitrogen', 'phosphorus', 'potassium', 'soilType', 'ph', 'analysis', 'createdAt'])
+        && data.keys().size() <= 11
+        && data.id is string
+        && data.userId == request.auth.uid
+        && data.crop is string
+        && (data.nitrogen is float || data.nitrogen is int)
+        && (data.phosphorus is float || data.phosphorus is int)
+        && (data.potassium is float || data.potassium is int)
+        && data.soilType is string
+        && (data.ph is float || data.ph is int)
+        && data.analysis is string
+        && data.createdAt is string
+        && (!('fertilizerRecommendation' in data) || data.fertilizerRecommendation is string);
+    }
+
+    function isValidChat(data) {
+      return data.keys().hasAll(['id', 'userId', 'message', 'sender', 'language', 'createdAt'])
+        && data.keys().size() <= 6
+        && data.id is string
+        && data.userId == request.auth.uid
+        && data.message is string
+        && (data.sender == 'user' || data.sender == 'ai')
+        && data.language is string
+        && data.createdAt is string;
+    }
+
+    function isValidPestAlert(data) {
+      return data.keys().hasAll(['id', 'userId', 'reporterName', 'district', 'state', 'cropType', 'pestName', 'severity', 'createdAt'])
+        && data.keys().size() <= 11
+        && data.id is string
+        && data.userId == request.auth.uid
+        && data.reporterName is string
+        && data.district is string
+        && data.state is string
+        && data.cropType is string
+        && data.pestName is string
+        && (data.severity == 'low' || data.severity == 'medium' || data.severity == 'high')
+        && data.createdAt is string
+        && (!('description' in data) || data.description is string)
+        && (!('severityScore' in data) || data.severityScore is float || data.severityScore is int);
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'body', 'type', 'read', 'createdAt'])
+        && data.keys().size() <= 7
+        && data.id is string
+        && data.userId is string
+        && data.title is string
+        && data.body is string
+        && (data.type == 'weather' || data.type == 'disease' || data.type == 'mandi' || data.type == 'alert' || data.type == 'scheme')
+        && data.read is bool
+        && data.createdAt is string;
+    }
+
+    // Rules for Users collection
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+      allow list: if isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidUser(request.resource.data);
+      allow update: if isSignedIn() && request.auth.uid == userId 
+        && isValidUser(request.resource.data) 
+        && (!('uid' in resource.data) || request.resource.data.uid == resource.data.uid)
+        && (!('role' in resource.data) || request.resource.data.role == resource.data.role)
+        && (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isSignedIn() && (request.auth.uid == userId || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+
+    // Rules for Disease Reports collection
+    match /diseaseReports/{reportId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'officer');
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'officer');
+      allow create: if isSignedIn() && isValidDiseaseReport(request.resource.data);
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid 
+        && isValidDiseaseReport(request.resource.data)
+        && (!('userId' in resource.data) || request.resource.data.userId == resource.data.userId)
+        && (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Rules for Soil Reports collection
+    match /soilReports/{reportId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidSoilReport(request.resource.data);
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid 
+        && isValidSoilReport(request.resource.data)
+        && (!('userId' in resource.data) || request.resource.data.userId == resource.data.userId)
+        && (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Rules for Chat History collection
+    match /chatHistory/{chatId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidChat(request.resource.data);
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid 
+        && isValidChat(request.resource.data)
+        && (!('userId' in resource.data) || request.resource.data.userId == resource.data.userId)
+        && (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Rules for Pest Alerts collection (Shared community warning network)
+    match /pestAlerts/{alertId} {
+      allow read: if isSignedIn(); // All signed-in farmers can see community outbreak heatmaps
+      allow create: if isSignedIn() && isValidPestAlert(request.resource.data);
+      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'officer') 
+        && isValidPestAlert(request.resource.data)
+        && (!('userId' in resource.data) || request.resource.data.userId == resource.data.userId)
+        && (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'officer');
+    }
+
+    // Rules for Notifications collection
+    match /notifications/{notifId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.userId == 'all');
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.userId == 'all');
+      allow create: if isSignedIn() && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'officer' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') && isValidNotification(request.resource.data);
+      allow update: if isSignedIn() && isValidNotification(request.resource.data) && (resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']));
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+  }
+}
